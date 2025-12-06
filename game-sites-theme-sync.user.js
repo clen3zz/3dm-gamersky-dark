@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         游戏网站深浅色主题跟随系统 (3DM & 游民)
 // @namespace    https://github.com/clen3zz/
-// @version      2.3
+// @version      2.4
 // @description  3DMGAME、游民星空等游戏网站深浅色主题自动跟随系统脚本。
 // @author       clen3zz
 // @match        https://www.3dmgame.com/*
