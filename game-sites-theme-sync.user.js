@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name         游戏网站深浅色主题跟随系统 (3DM & 游民)
 // @namespace    https://github.com/clen3zz/
-// @version      2.4
-// @description  3DMGAME、游民星空等游戏网站深浅色主题自动跟随系统脚本。
+// @version      3.0
+// @description  3DMGAME、游民星空等游戏网站深浅色主题自动跟随系统脚本（修正3DM失效问题）。
 // @author       clen3zz
 // @match        https://www.3dmgame.com/*
 // @match        https://www.gamersky.com/*
 // @grant        none
-// @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/clen3zz/game-sites-theme-sync/main/game-sites-theme-sync.user.js
-// @downloadURL  https://raw.githubusercontent.com/clen3zz/game-sites-theme-sync/main/game-sites-theme-sync.user.js
+// @run-at       document-start
+// @updateURL    https://raw.githubusercontent.com/clen3zz/3dm-gamersky-dark/main/game-sites-theme-sync.user.js
+// @downloadURL  https://raw.githubusercontent.com/clen3zz/3dm-gamersky-dark/main/game-sites-theme-sync.user.js
 // ==/UserScript==
 
 (function () {
