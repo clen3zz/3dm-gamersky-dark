@@ -13,181 +13,168 @@
 // ==/UserScript==
 
 (function () {
-  'use strict';
+    'use strict';
 
-  const mq = matchMedia('(prefers-color-scheme: dark)');
-  let syncing = false;
-  let ticking = false;
+    const mq = matchMedia('(prefers-color-scheme: dark)');
 
-  // ---- 站点适配器 ----
-  const adapters = [
-    {
-      test: () => location.hostname.includes('3dmgame.com'),
-      readTheme() {
-        // 读 body.nightbody 或 localStorage.theme
-        const ls = safeLSGet('theme'); // 'dark' | 'light' | null
-        if (document.body) {
-          if (document.body.classList.contains('nightbody')) return true;
-          if (ls === 'dark') return true;
-          if (ls === 'light') return false;
+    // ==========================================
+    // 核心逻辑控制器
+    // ==========================================
+    const Controller = {
+        adapter: null,
+        observer: null,
+
+        init() {
+            // 1. 查找适配器
+            this.adapter = adapters.find(a => a.test());
+            if (!this.adapter) return;
+
+            // 2. 立即执行数据层同步 (在页面渲染前)
+            this.syncData(mq.matches);
+
+            // 3. 监听 DOM 变化 (UI 层强制锁定)
+            this.startObserver();
+
+            // 4. 监听系统主题切换
+            if (mq.addEventListener) {
+                mq.addEventListener('change', e => this.handleSystemChange(e));
+            } else {
+                mq.addListener(e => this.handleSystemChange(e)); // 兼容旧版
+            }
+
+            // 5. 页面加载完成后再次检查 (防止页面脚本覆盖)
+            window.addEventListener('load', () => this.syncUI(mq.matches));
+        },
+
+        handleSystemChange(e) {
+            const isDark = e.matches;
+            this.syncData(isDark);
+            this.syncUI(isDark);
+        },
+
+        // 数据层同步：修改 LS 和 Cookie，让网站原生脚本读取到正确配置
+        syncData(isDark) {
+            this.adapter.applyData(isDark);
+        },
+
+        // UI 层同步：强制操作 DOM Class
+        syncUI(isDark) {
+            // 确保 HTML 标签声明了 color-scheme，避免原生组件（滚动条等）亮瞎眼
+            const html = document.documentElement;
+            const scheme = isDark ? 'dark' : 'light';
+            if (html.style.colorScheme !== scheme) {
+                html.style.colorScheme = scheme;
+            }
+
+            // 调用适配器处理 DOM
+            this.adapter.applyDOM(isDark);
+        },
+
+        startObserver() {
+            // 等待 body 出现
+            const onBodyReady = () => {
+                if (!document.body) {
+                    requestAnimationFrame(onBodyReady);
+                    return;
+                }
+                // 立即同步一次 UI
+                this.syncUI(mq.matches);
+
+                // 开启持久监听
+                if (this.observer) this.observer.disconnect();
+                this.observer = new MutationObserver((mutations) => {
+                    // 过滤掉无关变动，只关心 class 变化
+                    const relevantMutation = mutations.some(m =>
+                        m.type === 'attributes' &&
+                        (m.attributeName === 'class' || m.attributeName === 'className')
+                    );
+                    if (relevantMutation) {
+                        // 如果检测到 Class 变动，检查是否符合当前系统主题，不符合则强制修正
+                        // 使用 requestAnimationFrame 防止在极短时间内发生无限循环冲突
+                        requestAnimationFrame(() => this.syncUI(mq.matches));
+                    }
+                });
+
+                const targetNode = this.adapter.observeTarget ? this.adapter.observeTarget() : document.body;
+                if (targetNode) {
+                    this.observer.observe(targetNode, {
+                        attributes: true,
+                        attributeFilter: ['class', 'className']
+                    });
+                }
+            };
+            onBodyReady();
         }
-        return null;
-      },
-      apply(isDark) {
-        // 仅在变化时写入
-        const cur = this.readTheme();
-        if (cur !== null && cur === isDark) return;
+    };
 
-        safeLSSet('theme', isDark ? 'dark' : 'light');
-        ensureHtmlColorScheme(isDark);
+    // ==========================================
+    // 站点适配器
+    // ==========================================
+    const adapters = [
+        {
+            // --- 3DMGAME 适配器 ---
+            test: () => location.hostname.includes('3dmgame.com'),
+            observeTarget: () => document.body,
+            applyData(isDark) {
+                const val = isDark ? 'dark' : 'light';
+                // 1. 强制写入 LocalStorage
+                try {
+                    if (localStorage.getItem('theme') !== val) {
+                        localStorage.setItem('theme', val);
+                    }
+                } catch (e) {}
 
-        if (document.body) {
-          document.body.classList.toggle('nightbody', isDark);
-        } else {
-          onBodyReady(() => document.body.classList.toggle('nightbody', isDark));
+                // 2. 强制写入 Cookie (3DM 部分老代码读 Cookie)
+                const hostname = location.hostname.split('.').slice(-2).join('.');
+                document.cookie = `theme=${val}; path=/; domain=.${hostname}; max-age=31536000`;
+            },
+            applyDOM(isDark) {
+                if (!document.body) return;
+                const hasClass = document.body.classList.contains('nightbody');
+                if (isDark && !hasClass) {
+                    document.body.classList.add('nightbody');
+                } else if (!isDark && hasClass) {
+                    document.body.classList.remove('nightbody');
+                }
+            }
+        },
+        {
+            // --- 游民星空 适配器 ---
+            test: () => location.hostname.includes('gamersky.com'),
+            observeTarget: () => document.body,
+            applyData(isDark) {
+                const val = isDark ? 'd' : 'n';
+                try {
+                    if (localStorage.getItem('GS_D_N_Mode') !== val) {
+                        localStorage.setItem('GS_D_N_Mode', val);
+                    }
+                } catch (e) {}
+            },
+            applyDOM(isDark) {
+                const html = document.documentElement;
+                
+                // 处理 HTML 标签
+                if (isDark && !html.classList.contains('dark')) html.classList.add('dark');
+                if (!isDark && html.classList.contains('dark')) html.classList.remove('dark');
+
+                // 处理 Body 标签
+                if (document.body) {
+                    const body = document.body;
+                    if (isDark) {
+                        if (body.classList.contains('bai')) body.classList.remove('bai');
+                        if (!body.classList.contains('hei')) body.classList.add('hei');
+                    } else {
+                        if (body.classList.contains('hei')) body.classList.remove('hei');
+                        if (!body.classList.contains('bai')) body.classList.add('bai');
+                    }
+                }
+            }
         }
-      },
-      antiFlipSelectors: ['body']
-    },
-    {
-      test: () => location.hostname.includes('gamersky.com'),
-      readTheme() {
-        // html.dark / body.hei|bai / localStorage.GS_D_N_Mode = 'd'|'n'
-        const ls = safeLSGet('GS_D_N_Mode'); // 'd'|'n'
-        const html = document.documentElement;
-        if (html.classList.contains('dark')) return true;
-        if (document.body) {
-          if (document.body.classList.contains('hei')) return true;
-          if (document.body.classList.contains('bai')) return false;
-        }
-        if (ls === 'd') return true;
-        if (ls === 'n') return false;
-        return null;
-      },
-      apply(isDark) {
-        const cur = this.readTheme();
-        if (cur !== null && cur === isDark) return;
+    ];
 
-        safeLSSet('GS_D_N_Mode', isDark ? 'd' : 'n');
-        ensureHtmlColorScheme(isDark);
+    // ==========================================
+    // 启动
+    // ==========================================
+    Controller.init();
 
-        const html = document.documentElement;
-        html.classList.toggle('dark', isDark);
-
-        const applyBody = () => {
-          if (!document.body) return;
-          if (isDark) {
-            document.body.classList.remove('bai');
-            document.body.classList.add('hei');
-          } else {
-            document.body.classList.remove('hei');
-            document.body.classList.add('bai');
-          }
-        };
-        if (document.body) applyBody(); else onBodyReady(applyBody);
-      },
-      antiFlipSelectors: ['html', 'body']
-    }
-  ];
-
-  const adapter = adapters.find(a => a.test());
-  if (!adapter) return;
-
-  // —— 启动：document-start 就给 html 布置 color-scheme，降低首屏闪烁
-  ensureHtmlColorScheme(mq.matches);
-
-  // 首次同步（DOMContentLoaded 或更早，如果已可读就立即）
-  ready(syncToSystem);
-
-  // 系统变更：节流处理
-  (mq.addEventListener ? mq.addEventListener('change', onSystemChange) : mq.addListener(onSystemChange));
-
-  // 页面完全加载后再保守同步一次（站点脚本跑完之后）
-  addEventListener('load', () => syncToSystem());
-
-  // bfcache 恢复（前进后退）时再对齐一次
-  addEventListener('pageshow', (e) => { if (e.persisted) syncToSystem(); });
-
-  // ========= 核心 =========
-  async function syncToSystem() {
-    if (syncing) return;
-    syncing = true;
-    try {
-      const wantDark = mq.matches;
-      // 已一致 → 零动作
-      const cur = adapter.readTheme();
-      if (cur !== null && cur === wantDark) return;
-
-      // 应用
-      adapter.apply(wantDark);
-
-      // 短时抗反改：站点脚本若 1s 内把 class 改回，立即再同步一次（最多 2 次）
-      antiFlipGuard(adapter, wantDark, 2, 1000);
-    } catch {}
-    finally { syncing = false; }
-  }
-
-  function onSystemChange() {
-    if (ticking) return;
-    ticking = true;
-    queueMicrotask(() => { syncToSystem(); ticking = false; });
-  }
-
-  // ========= 小工具 =========
-  function ensureHtmlColorScheme(isDark) {
-    try {
-      const html = document.documentElement;
-      // 只在变化时改，避免多余回流
-      const cur = html.style.colorScheme || '';
-      const want = isDark ? 'dark' : 'light';
-      if (!cur.includes(want)) {
-        html.style.colorScheme = want; // 原生表单、滚动条也会跟随
-      }
-    } catch {}
-  }
-
-  function antiFlipGuard(ad, wantDark, maxTimes = 2, windowMs = 1000) {
-    if (!ad.antiFlipSelectors?.length) return;
-    let times = 0;
-    const endAt = Date.now() + windowMs;
-
-    const obs = new MutationObserver(() => {
-      if (Date.now() > endAt || times >= maxTimes) { obs.disconnect(); return; }
-      const cur = ad.readTheme();
-      if (cur !== null && cur !== wantDark) {
-        times++;
-        ad.apply(wantDark);
-      }
-    });
-
-    const nodes = ad.antiFlipSelectors
-      .map(sel => document.querySelector(sel))
-      .filter(Boolean);
-
-    nodes.forEach(n => obs.observe(n, { attributes: true, attributeFilter: ['class'] }));
-    setTimeout(() => obs.disconnect(), windowMs + 50);
-  }
-
-  function safeLSGet(key) {
-    try { return localStorage.getItem(key); } catch { return null; }
-  }
-  function safeLSSet(key, val) {
-    try {
-      const old = localStorage.getItem(key);
-      if (old !== val) localStorage.setItem(key, val);
-    } catch {}
-  }
-
-  function onBodyReady(fn) {
-    if (document.body) { fn(); return; }
-    const mo = new MutationObserver(() => {
-      if (document.body) { mo.disconnect(); fn(); }
-    });
-    mo.observe(document.documentElement, { childList: true, subtree: true });
-  }
-
-  function ready(fn) {
-    if (document.readyState === 'complete' || document.readyState === 'interactive') fn();
-    else addEventListener('DOMContentLoaded', fn, { once: true });
-  }
 })();
